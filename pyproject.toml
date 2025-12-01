@@ -1,5 +1,8 @@
 [build-system]
-requires = ["setuptools>=61.0"]
+requires = [
+    "setuptools>=64",
+    "wheel",
+]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -12,6 +15,9 @@ requires-python = ">=3.10"
 dependencies = [
     "Pillow>=10.3.0",
 ]
+
+[tool.setuptools.packages.find]
+include = ["video_cropper"]
 
 [project.scripts]
 video-cropper = "video_cropper.app:run"
