@@ -17,23 +17,46 @@ A lightweight Tkinter desktop tool for Windows that makes it easy to crop common
 
 ## Setup
 
-```bash
-python -m venv .venv
-source .venv/bin/activate  # Windows: .venv\Scripts\activate
-pip install -e .
-```
+1. Install [ffmpeg](https://ffmpeg.org/download.html) and ensure both `ffmpeg` and `ffprobe` are on your `PATH`.
+   - Windows: install the static build or run `choco install ffmpeg`.
+   - macOS: `brew install ffmpeg`.
+   - Verify with `ffmpeg -version` and `ffprobe -version` after installation.
+2. Create and activate a virtual environment:
+
+   ```bash
+   python -m venv .venv
+   source .venv/bin/activate  # Windows: .venv\Scripts\activate
+   ```
+
+3. Upgrade packaging tools so editable installs work even on older pip versions:
+
+   ```bash
+   python -m pip install --upgrade pip setuptools wheel
+   ```
+
+4. Install the app in editable mode (pulls in Pillow automatically). If you still
+   see a message about editable mode requiring setuptools, upgrade pip to the
+   latest release:
+
+   ```bash
+   pip install -e .
+   ```
 
 ## Usage
 
+You can launch the UI either via the module entry point or the installed script:
+
 ```bash
 python -m video_cropper
+# or, after installation
+video-cropper
 ```
 
-1. **Open Video** and pick a file.
-2. Select an **Aspect Preset** (or leave as Freeform).
+1. Click **Open Video** and pick a file.
+2. Select an **Aspect Preset** (or leave as Freeform) to lock the crop box.
 3. Drag on the preview to set the crop box. You can also type coordinates in the sidebar.
 4. Click **Preview Crop** to refresh the preview with the crop applied.
-5. Click **Export Video** to render and save.
+5. Click **Export Video** to render and save. The export runs in the background so the UI stays responsive.
 
 ## Notes
 
