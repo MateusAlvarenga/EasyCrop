@@ -46,6 +46,11 @@ class VideoCropperApp:
         self.crop_box = CropBox(0, 0, 0, 0)
         self.drag_start = None
         self.aspect_ratio: float | None = None
+        self.duration: float = 0.0
+        self.timeline_var = tk.DoubleVar(value=0.0)
+        self.is_playing = False
+        self.playback_job: str | None = None
+        self._playback_step = 0.5
         self._temp_dir = Path(tempfile.mkdtemp(prefix="video_cropper_"))
 
         self._build_ui()
@@ -69,11 +74,30 @@ class VideoCropperApp:
         content = ttk.Frame(container)
         content.pack(fill=tk.BOTH, expand=True)
 
-        self.canvas = tk.Canvas(content, width=900, height=520, bg="#1c1c1c", highlightthickness=0)
-        self.canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        left_panel = ttk.Frame(content)
+        left_panel.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+        self.canvas = tk.Canvas(left_panel, width=900, height=520, bg="#1c1c1c", highlightthickness=0)
+        self.canvas.pack(fill=tk.BOTH, expand=True)
         self.canvas.bind("<ButtonPress-1>", self._on_press)
         self.canvas.bind("<B1-Motion>", self._on_drag)
         self.canvas.bind("<ButtonRelease-1>", self._on_release)
+
+        controls = ttk.Frame(left_panel)
+        controls.pack(fill=tk.X, pady=(8, 0))
+        self.play_button = ttk.Button(controls, text="Play", command=self._toggle_playback, width=10)
+        self.play_button.pack(side=tk.LEFT, padx=(0, 8))
+        self.timeline = ttk.Scale(
+            controls,
+            from_=0.0,
+            to=0.0,
+            orient=tk.HORIZONTAL,
+            variable=self.timeline_var,
+            command=self._on_seek,
+        )
+        self.timeline.pack(side=tk.LEFT, fill=tk.X, expand=True)
+        self.time_label = ttk.Label(controls, text="0.0s / 0.0s")
+        self.time_label.pack(side=tk.LEFT, padx=(8, 0))
 
         sidebar = ttk.Frame(content, width=280)
         sidebar.pack(side=tk.RIGHT, fill=tk.Y, padx=(12, 0))
@@ -145,11 +169,7 @@ class VideoCropperApp:
     # Core logic ----------------------------------------------------------
     def _load_preview_frame(self) -> None:
         assert self.video_path
-        preview_path = self._temp_dir / "preview.png"
-        extract_frame(self.video_path, preview_path)
-        self.current_image = Image.open(preview_path).convert("RGB")
-        self._reset_crop_to_full_frame()
-        self._draw_canvas()
+        self._load_frame_at(0.0, reset_crop=True)
 
     def _reset_crop_to_full_frame(self) -> None:
         assert self.current_image
@@ -161,10 +181,14 @@ class VideoCropperApp:
         if not self.metadata:
             return
         duration = float(self.metadata["format"]["duration"])
+        self.duration = duration
         width = self.metadata["streams"][0]["width"]
         height = self.metadata["streams"][0]["height"]
         msg = f"Loaded: {self.video_path.name}\n{width}x{height} • {duration:.2f}s"
         self.info_label.config(text=msg)
+        self.timeline.configure(to=max(duration, 0.01))
+        self.timeline_var.set(0.0)
+        self._update_time_label(0.0)
 
     def _draw_canvas(self) -> None:
         if not self.current_image:
@@ -326,6 +350,64 @@ class VideoCropperApp:
         self.log_box.insert(tk.END, text + "\n")
         self.log_box.configure(state=tk.DISABLED)
         self.log_box.see(tk.END)
+
+    def _load_frame_at(self, timestamp: float, *, reset_crop: bool = False) -> None:
+        if not self.video_path:
+            return
+        preview_path = self._temp_dir / "preview.png"
+        extract_frame(self.video_path, preview_path, timestamp=timestamp)
+        self.current_image = Image.open(preview_path).convert("RGB")
+        if reset_crop or self.crop_box.width == 0:
+            self._reset_crop_to_full_frame()
+        self._draw_canvas()
+
+    def _update_time_label(self, current: float) -> None:
+        self.time_label.config(text=f"{current:.1f}s / {self.duration:.1f}s")
+
+    def _on_seek(self, value: str) -> None:
+        if not self.video_path:
+            return
+        timestamp = float(value)
+        self._update_time_label(timestamp)
+        self._load_frame_at(timestamp)
+        if self.is_playing:
+            self._stop_playback()
+
+    def _toggle_playback(self) -> None:
+        if not self.video_path or self.duration == 0:
+            messagebox.showinfo("Select a video", "Please open a video before playing.")
+            return
+        if self.is_playing:
+            self._stop_playback()
+        else:
+            self.is_playing = True
+            self.play_button.config(text="Pause")
+            self._schedule_next_frame()
+
+    def _stop_playback(self) -> None:
+        self.is_playing = False
+        self.play_button.config(text="Play")
+        if self.playback_job:
+            self.root.after_cancel(self.playback_job)
+            self.playback_job = None
+
+    def _schedule_next_frame(self) -> None:
+        if not self.is_playing:
+            return
+        self.playback_job = self.root.after(int(self._playback_step * 1000), self._advance_frame)
+
+    def _advance_frame(self) -> None:
+        if not self.is_playing:
+            return
+        next_time = self.timeline_var.get() + self._playback_step
+        if next_time >= self.duration:
+            next_time = self.duration
+            self._stop_playback()
+        self.timeline_var.set(next_time)
+        self._update_time_label(next_time)
+        self._load_frame_at(next_time)
+        if self.is_playing:
+            self._schedule_next_frame()
 
 
 def run() -> None:
