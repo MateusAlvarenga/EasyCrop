@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import tempfile
 import threading
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Tuple
@@ -10,6 +11,7 @@ from typing import Callable, Tuple
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 from PIL import Image, ImageTk
+import vlc
 
 from .ffmpeg_utils import crop_video, extract_frame, probe_video
 
@@ -52,6 +54,8 @@ class VideoCropperApp:
         self.playback_job: str | None = None
         self._playback_step = 0.5
         self._temp_dir = Path(tempfile.mkdtemp(prefix="video_cropper_"))
+        self.vlc_instance = vlc.Instance()
+        self.media_player: vlc.MediaPlayer | None = None
 
         self._build_ui()
 
@@ -136,6 +140,7 @@ class VideoCropperApp:
         self.video_path = Path(file_path)
         try:
             self.metadata = probe_video(self.video_path)
+            self._load_media_player()
             self._update_info()
             self._load_preview_frame()
         except Exception as exc:  # noqa: BLE001
@@ -392,8 +397,9 @@ class VideoCropperApp:
         if not self.video_path:
             return
         preview_path = self._temp_dir / "preview.png"
-        extract_frame(self.video_path, preview_path, timestamp=timestamp)
-        self.current_image = Image.open(preview_path).convert("RGB")
+        if not self._capture_vlc_snapshot(preview_path, timestamp=timestamp):
+            extract_frame(self.video_path, preview_path, timestamp=timestamp)
+            self.current_image = Image.open(preview_path).convert("RGB")
         if reset_crop or self.crop_box.width == 0:
             self._reset_crop_to_full_frame()
         self._draw_canvas()
@@ -406,9 +412,10 @@ class VideoCropperApp:
             return
         timestamp = float(value)
         self._update_time_label(timestamp)
-        self._load_frame_at(timestamp)
         if self.is_playing:
-            self._stop_playback()
+            if self.media_player:
+                self.media_player.set_time(int(timestamp * 1000))
+        self._load_frame_at(timestamp)
 
     def _toggle_playback(self) -> None:
         if not self.video_path or self.duration == 0:
@@ -417,34 +424,72 @@ class VideoCropperApp:
         if self.is_playing:
             self._stop_playback()
         else:
+            if self.media_player:
+                self.media_player.set_time(int(self.timeline_var.get() * 1000))
+                self.media_player.play()
             self.is_playing = True
             self.play_button.config(text="Pause")
-            self._schedule_next_frame()
+            self._poll_playback()
 
     def _stop_playback(self) -> None:
         self.is_playing = False
         self.play_button.config(text="Play")
+        if self.media_player:
+            self.media_player.pause()
         if self.playback_job:
             self.root.after_cancel(self.playback_job)
             self.playback_job = None
 
-    def _schedule_next_frame(self) -> None:
-        if not self.is_playing:
+    def _poll_playback(self) -> None:
+        if not self.is_playing or not self.media_player:
             return
-        self.playback_job = self.root.after(int(self._playback_step * 1000), self._advance_frame)
 
-    def _advance_frame(self) -> None:
-        if not self.is_playing:
-            return
-        next_time = self.timeline_var.get() + self._playback_step
-        if next_time >= self.duration:
-            next_time = self.duration
+        current_ms = self.media_player.get_time()
+        if current_ms >= 0:
+            current = current_ms / 1000
+            self.timeline_var.set(current)
+            self._update_time_label(current)
+            self._capture_vlc_snapshot(self._temp_dir / "preview.png")
+            if self.current_image:
+                self._draw_canvas()
+
+            if current >= self.duration - 0.05:
+                self._stop_playback()
+                self.timeline_var.set(self.duration)
+                self._update_time_label(self.duration)
+                return
+
+        state = self.media_player.get_state()
+        if state in (vlc.State.Ended, vlc.State.Error):
             self._stop_playback()
-        self.timeline_var.set(next_time)
-        self._update_time_label(next_time)
-        self._load_frame_at(next_time)
-        if self.is_playing:
-            self._schedule_next_frame()
+            return
+
+        self.playback_job = self.root.after(int(self._playback_step * 1000), self._poll_playback)
+
+    def _load_media_player(self) -> None:
+        if self.media_player:
+            self.media_player.stop()
+        self.media_player = self.vlc_instance.media_player_new()
+        media = self.vlc_instance.media_new(str(self.video_path))
+        self.media_player.set_media(media)
+        self.media_player.play()
+        time.sleep(0.1)
+        self.media_player.pause()
+
+    def _capture_vlc_snapshot(self, output_path: Path, *, timestamp: float | None = None) -> bool:
+        if not self.media_player:
+            return False
+        try:
+            if timestamp is not None:
+                self.media_player.set_time(int(timestamp * 1000))
+                self.media_player.pause()
+                time.sleep(0.05)
+            if self.media_player.video_take_snapshot(0, str(output_path), 0, 0) == 0:
+                self.current_image = Image.open(output_path).convert("RGB")
+                return True
+        except Exception:
+            return False
+        return False
 
 
 def run() -> None:
