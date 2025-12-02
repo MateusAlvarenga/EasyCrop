@@ -14,6 +14,7 @@ readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
     "Pillow>=10.3.0",
+    "python-vlc>=3.0.20123",
 ]
 
 [tool.setuptools.packages.find]
