@@ -5,7 +5,7 @@ import tempfile
 import threading
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Tuple
+from typing import Callable, Tuple
 
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
@@ -69,7 +69,8 @@ class VideoCropperApp:
         self.aspect_select.bind("<<ComboboxSelected>>", self._apply_preset)
         self.aspect_select.pack(side=tk.LEFT)
         ttk.Button(top_bar, text="Preview Crop", command=self._preview_crop).pack(side=tk.LEFT, padx=6)
-        ttk.Button(top_bar, text="Export Video", command=self._export_video).pack(side=tk.LEFT)
+        ttk.Button(top_bar, text="Save As…", command=self._save_as_video).pack(side=tk.LEFT)
+        ttk.Button(top_bar, text="Save", command=self._save_overwrite).pack(side=tk.LEFT, padx=(6, 0))
 
         content = ttk.Frame(container)
         content.pack(fill=tk.BOTH, expand=True)
@@ -316,7 +317,7 @@ class VideoCropperApp:
         finally:
             self.root.config(cursor="")
 
-    def _export_video(self) -> None:
+    def _save_as_video(self) -> None:
         if not self.video_path:
             messagebox.showinfo("Select a video", "Please open a video before exporting.")
             return
@@ -336,12 +337,48 @@ class VideoCropperApp:
         )
         thread.start()
 
-    def _run_export(self, output: Path) -> None:
+    def _save_overwrite(self) -> None:
+        if not self.video_path:
+            messagebox.showinfo("Select a video", "Please open a video before exporting.")
+            return
+
+        try:
+            with tempfile.NamedTemporaryFile(
+                suffix=self.video_path.suffix, dir=self.video_path.parent, delete=False
+            ) as tmp:
+                temp_output = Path(tmp.name)
+        except Exception as exc:  # noqa: BLE001
+            messagebox.showerror("Error", f"Unable to create a temporary file: {exc}")
+            return
+
+        self._log(f"Saving over {self.video_path.name}…")
+        thread = threading.Thread(
+            target=self._run_export,
+            args=(temp_output,),
+            kwargs={"finalize": self._finalize_overwrite},
+            daemon=True,
+        )
+        thread.start()
+
+    def _finalize_overwrite(self, temp_output: Path) -> Path:
+        assert self.video_path
+        try:
+            if self.video_path.exists():
+                self.video_path.unlink()
+            temp_output.rename(self.video_path)
+        except Exception as exc:  # noqa: BLE001
+            raise RuntimeError(f"Failed to replace file: {exc}")
+        return self.video_path
+
+    def _run_export(self, output: Path, *, finalize: Callable[[Path], Path] | None = None) -> None:
         try:
             crop_video(self.video_path, output, self.crop_box.as_tuple(), progress_callback=self._log)
+            final_path = finalize(output) if finalize else output
             self._log("Export complete!")
-            messagebox.showinfo("Done", f"Saved cropped video to {output}")
+            messagebox.showinfo("Done", f"Saved cropped video to {final_path}")
         except Exception as exc:  # noqa: BLE001
+            if output.exists():
+                output.unlink(missing_ok=True)
             self._log(str(exc))
             messagebox.showerror("Error", str(exc))
 
