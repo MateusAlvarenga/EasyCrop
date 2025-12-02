@@ -55,8 +55,16 @@ class VideoCropperApp:
         self.playback_job: str | None = None
         self._playback_step = 0.5
         self._temp_dir = Path(tempfile.mkdtemp(prefix="video_cropper_"))
-        self.vlc_instance = vlc.Instance()
+        # Enable normal audio + hardware decoding for smoother playback.
+        # Suppress the on-video title overlay and reduce log noise.
+        self.vlc_instance = vlc.Instance(
+            "--no-video-title-show",
+            "--quiet",
+        )
+
         self.media_player: vlc.MediaPlayer | None = None
+        # Frame that hosts the VLC video surface.
+        self.video_panel: tk.Frame | None = None
 
         self._build_ui()
 
@@ -83,8 +91,21 @@ class VideoCropperApp:
         left_panel = ttk.Frame(content)
         left_panel.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
-        self.canvas = tk.Canvas(left_panel, width=900, height=520, bg="#1c1c1c", highlightthickness=0)
-        self.canvas.pack(fill=tk.BOTH, expand=True)
+        # Container that holds the VLC video surface plus a transparent
+        # Canvas overlay where the crop box is drawn and mouse events are
+        # handled.
+        video_container = tk.Frame(left_panel, width=900, height=520, bg="#000000")
+        video_container.pack(fill=tk.BOTH, expand=True)
+
+        # This frame is the actual render target for VLC.
+        self.video_panel = tk.Frame(video_container, bg="#000000")
+        self.video_panel.pack(fill=tk.BOTH, expand=True)
+
+        # Canvas placed on top of the video surface; it does not paint a
+        # background so the video stays visible underneath, but it draws the
+        # crop rectangle and handles mouse interaction.
+        self.canvas = tk.Canvas(video_container, highlightthickness=0, bd=0)
+        self.canvas.place(relx=0, rely=0, relwidth=1, relheight=1)
         self.canvas.bind("<ButtonPress-1>", self._on_press)
         self.canvas.bind("<B1-Motion>", self._on_drag)
         self.canvas.bind("<ButtonRelease-1>", self._on_release)
@@ -348,6 +369,19 @@ class VideoCropperApp:
             messagebox.showinfo("Select a video", "Please open a video before exporting.")
             return
 
+        # Ensure VLC is not holding the file handle so Windows allows us
+        # to delete/replace the file during overwrite.
+        if self.media_player:
+            try:
+                self.media_player.stop()
+            except Exception:  # noqa: BLE001
+                pass
+            try:
+                self.media_player.release()
+            except Exception:  # noqa: BLE001
+                pass
+            self.media_player = None
+
         try:
             with tempfile.NamedTemporaryFile(
                 suffix=self.video_path.suffix, dir=self.video_path.parent, delete=False
@@ -376,11 +410,25 @@ class VideoCropperApp:
             raise RuntimeError(f"Failed to replace file: {exc}")
         return self.video_path
 
+    def _reload_after_export(self, path: Path) -> None:
+        """Reload the just-exported file back into the player."""
+        self.video_path = path
+        try:
+            self.metadata = probe_video(self.video_path)
+            self._load_media_player()
+            self._update_info()
+            self._load_preview_frame()
+        except Exception as exc:  # noqa: BLE001
+            messagebox.showerror("Error", str(exc))
+            self._log(str(exc))
+
     def _run_export(self, output: Path, *, finalize: Callable[[Path], Path] | None = None) -> None:
         try:
             crop_video(self.video_path, output, self.crop_box.as_tuple(), progress_callback=self._log)
             final_path = finalize(output) if finalize else output
             self._log("Export complete!")
+            # Schedule UI update on the Tk main thread: reopen the file.
+            self.root.after(0, lambda: self._reload_after_export(final_path))
             messagebox.showinfo("Done", f"Saved cropped video to {final_path}")
         except Exception as exc:  # noqa: BLE001
             if output.exists():
@@ -467,10 +515,35 @@ class VideoCropperApp:
 
         self.playback_job = self.root.after(int(self._playback_step * 1000), self._poll_playback)
 
+    def _set_media_player_window(self) -> None:
+        """Attach VLC video output to an in-app widget instead of a new window."""
+        if not self.media_player or not self.video_panel:
+            return
+
+        # Ensure the Tk widget has a valid native window handle.
+        self.root.update_idletasks()
+        handle = self.video_panel.winfo_id()
+        system = platform.system()
+        try:
+            if system == "Windows":
+                self.media_player.set_hwnd(handle)
+            elif system == "Linux":
+                # On X11, winfo_id() returns the XID.
+                self.media_player.set_xwindow(handle)
+            elif system == "Darwin":
+                # On macOS, python-vlc expects an NSView pointer; winfo_id()
+                # usually returns a compatible value for Tk widgets.
+                self.media_player.set_nsobject(handle)
+        except Exception:
+            # If binding fails for any reason, fall back to the default
+            # behavior (VLC may create its own window).
+            pass
+
     def _load_media_player(self) -> None:
         if self.media_player:
             self.media_player.stop()
         self.media_player = self.vlc_instance.media_player_new()
+        self._set_media_player_window()
         media = self.vlc_instance.media_new(str(self.video_path))
         self.media_player.set_media(media)
         self.media_player.play()
