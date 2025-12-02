@@ -1,6 +1,7 @@
 """Tkinter-based UI for interactive video cropping."""
 from __future__ import annotations
 
+import platform
 import tempfile
 import threading
 import time
