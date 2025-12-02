@@ -6,13 +6,14 @@ A lightweight Tkinter desktop tool for Windows that makes it easy to crop common
 
 - Supports common formats: `.mp4`, `.m4v`, `.mov`, `.mpg`, `.mpeg`, `.3gp`.
 - Drag-to-select crop box with optional aspect presets (CinemaScope 2.39:1, YouTube 16:9, Instagram Reels/TikTok 9:16, Square 1:1, Freeform).
-- Quick preview by grabbing a frame after applying the crop filter.
+- Smooth timeline preview powered by python-vlc snapshots.
 - ffmpeg-powered export that copies audio streams and uses the crop filter for reliable, hardware-independent results.
 
 ## Requirements
 
 - Python 3.10+
 - ffmpeg and ffprobe available on your PATH (install the static Windows builds or use a package manager like `choco install ffmpeg`).
+- [VLC media player](https://www.videolan.org/vlc/) installed so `python-vlc` can drive playback and snapshots.
 - Pillow (installed automatically via `pip`).
 
 ## Setup
