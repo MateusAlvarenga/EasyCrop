@@ -2,6 +2,9 @@
 
 A lightweight Tkinter desktop tool for Windows that makes it easy to crop common video formats with ffmpeg. The UI borrows familiar ideas from CapCut: open a video, pick a cinematic or social-friendly aspect preset (Reels, TikTok, YouTube, CinemaScope, square), drag the crop box, preview, and export.
 
+
+![Screenshot](./Screenshot.png)
+
 ## Features
 
 - Supports common formats: `.mp4`, `.m4v`, `.mov`, `.mpg`, `.mpeg`, `.3gp`.

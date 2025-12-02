@@ -13,15 +13,29 @@ from tkinter import filedialog, messagebox, ttk
 from PIL import Image, ImageTk
 import vlc
 
-from .core import (
-    ASPECT_PRESETS,
-    CropBox,
-    crop_box_from_canvas_drag,
-    describe_video,
-    full_frame_crop,
-    centered_crop_for_ratio,
-)
-from .ffmpeg_utils import crop_video, extract_frame, probe_video
+# Support running both as a package module (`python -m video_cropper.app`)
+# and as a top-level script or frozen executable, where relative imports
+# may not have a known parent package.
+try:
+    from .core import (
+        ASPECT_PRESETS,
+        CropBox,
+        crop_box_from_canvas_drag,
+        describe_video,
+        full_frame_crop,
+        centered_crop_for_ratio,
+    )
+    from .ffmpeg_utils import crop_video, extract_frame, probe_video
+except ImportError:
+    from video_cropper.core import (
+        ASPECT_PRESETS,
+        CropBox,
+        crop_box_from_canvas_drag,
+        describe_video,
+        full_frame_crop,
+        centered_crop_for_ratio,
+    )
+    from video_cropper.ffmpeg_utils import crop_video, extract_frame, probe_video
 
 
 class VideoCropperApp:

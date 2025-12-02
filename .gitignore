@@ -8,5 +8,6 @@ __pycache__/
 .dist
 build/
 dist/
+dist/*
 *.egg-info/
 video_cropper/__pycache__/
