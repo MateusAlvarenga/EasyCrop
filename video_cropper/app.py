@@ -5,37 +5,23 @@ import platform
 import tempfile
 import threading
 import time
-from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Tuple
+from typing import Callable
 
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 from PIL import Image, ImageTk
 import vlc
 
+from .core import (
+    ASPECT_PRESETS,
+    CropBox,
+    crop_box_from_canvas_drag,
+    describe_video,
+    full_frame_crop,
+    centered_crop_for_ratio,
+)
 from .ffmpeg_utils import crop_video, extract_frame, probe_video
-
-
-ASPECT_PRESETS = {
-    "Freeform": None,
-    "CinemaScope 2.39:1": 2.39,
-    "YouTube 16:9": 16 / 9,
-    "Instagram Reel 9:16": 9 / 16,
-    "TikTok 9:16": 9 / 16,
-    "Square 1:1": 1.0,
-}
-
-
-@dataclass
-class CropBox:
-    x: int
-    y: int
-    width: int
-    height: int
-
-    def as_tuple(self) -> Tuple[int, int, int, int]:
-        return self.x, self.y, self.width, self.height
 
 
 class VideoCropperApp:
@@ -202,13 +188,13 @@ class VideoCropperApp:
     def _reset_crop_to_full_frame(self) -> None:
         assert self.current_image
         width, height = self.current_image.size
-        self.crop_box = CropBox(0, 0, width, height)
+        self.crop_box = full_frame_crop(width, height)
         self._sync_vars()
 
     def _update_info(self) -> None:
-        if not self.metadata:
+        if not self.metadata or not self.video_path:
             return
-        duration = float(self.metadata["format"]["duration"])
+        msg, duration = describe_video(self.video_path, self.metadata)
         self.duration = duration
         width = self.metadata["streams"][0]["width"]
         height = self.metadata["streams"][0]["height"]
@@ -252,36 +238,17 @@ class VideoCropperApp:
         assert self.current_image
         canvas_width = self.canvas.winfo_width() or 900
         canvas_height = self.canvas.winfo_height() or 520
-        image_ratio = self.current_image.width / self.current_image.height
-        canvas_ratio = canvas_width / canvas_height
-        if image_ratio > canvas_ratio:
-            display_width = canvas_width
-            display_height = int(canvas_width / image_ratio)
-        else:
-            display_height = canvas_height
-            display_width = int(canvas_height * image_ratio)
-        offset_x = (canvas_width - display_width) // 2
-        offset_y = (canvas_height - display_height) // 2
-        scale_x = self.current_image.width / display_width
-        scale_y = self.current_image.height / display_height
-
-        x0 = max(offset_x, min(x0, offset_x + display_width))
-        y0 = max(offset_y, min(y0, offset_y + display_height))
-        x1 = max(offset_x, min(x1, offset_x + display_width))
-        y1 = max(offset_y, min(y1, offset_y + display_height))
-
-        x = int((x0 - offset_x) * scale_x)
-        y = int((y0 - offset_y) * scale_y)
-        width = int((x1 - x0) * scale_x)
-        height = int((y1 - y0) * scale_y)
-
-        if self.aspect_ratio:
-            width = int(height * self.aspect_ratio)
-
-        width = max(1, min(width, self.current_image.width - x))
-        height = max(1, min(height, self.current_image.height - y))
-
-        self.crop_box = CropBox(x, y, width, height)
+        self.crop_box = crop_box_from_canvas_drag(
+            self.current_image.width,
+            self.current_image.height,
+            canvas_width,
+            canvas_height,
+            x0,
+            y0,
+            x1,
+            y1,
+            self.aspect_ratio,
+        )
         self._sync_vars()
 
     def _sync_vars(self) -> None:
@@ -293,16 +260,7 @@ class VideoCropperApp:
     def _set_box_from_ratio(self, ratio: float) -> None:
         assert self.current_image
         w, h = self.current_image.size
-        base_height = int(w / ratio)
-        if base_height <= h:
-            width = w
-            height = base_height
-        else:
-            height = h
-            width = int(h * ratio)
-        x = (w - width) // 2
-        y = (h - height) // 2
-        self.crop_box = CropBox(x, y, width, height)
+        self.crop_box = centered_crop_for_ratio(w, h, ratio)
         self._sync_vars()
 
     def _preview_crop(self) -> None:
