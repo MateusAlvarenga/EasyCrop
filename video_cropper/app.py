@@ -473,7 +473,6 @@ class VideoCropperApp:
         self.media_player = self.vlc_instance.media_player_new()
         media = self.vlc_instance.media_new(str(self.video_path))
         self.media_player.set_media(media)
-        self._attach_media_player()
         self.media_player.play()
         time.sleep(0.1)
         self.media_player.pause()
@@ -492,27 +491,6 @@ class VideoCropperApp:
         except Exception:
             return False
         return False
-
-    def _attach_media_player(self) -> None:
-        """Ensure VLC renders to the Tk canvas instead of opening its own window."""
-
-        if not self.media_player:
-            return
-
-        try:
-            self.root.update_idletasks()
-            window_id = self.canvas.winfo_id()
-            system = platform.system()
-
-            if system == "Windows" and hasattr(self.media_player, "set_hwnd"):
-                self.media_player.set_hwnd(window_id)
-            elif system == "Darwin" and hasattr(self.media_player, "set_nsobject"):
-                self.media_player.set_nsobject(window_id)
-            elif hasattr(self.media_player, "set_xwindow"):
-                self.media_player.set_xwindow(window_id)
-        except Exception:
-            # Fallback: keep running without attaching if platform-specific handle fails
-            pass
 
 
 def run() -> None:
